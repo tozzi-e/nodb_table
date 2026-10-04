@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title> nodb_table a Base64URL Table Viewer</title>
+    <style>
+        :root {
+            --bg-body: #f8fafc;
+            --bg-card: #ffffff;
+            --bg-subtle: #f1f5f9;
+            --border-color: #e2e8f0;
+            --text-primary: #0f172a;
+            --text-secondary: #64748b;
+            --accent-color: #2563eb;
+            --accent-hover: #1d4ed8;
+            --success-color: #10b981;
+            --radius-md: 8px;
+            --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+        }
+
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-body);
+            color: var(--text-primary);
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 0 20px;
+        }
+
+        h2 {
+            font-size: 22px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            color: var(--text-primary);
+        }
+
+        /* Container Card */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-sm);
+            overflow: hidden;
+        }
+
+        /* Table Styling */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            background-color: var(--bg-subtle);
+            color: var(--text-secondary);
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            padding: 12px 18px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        td {
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 14px;
+            color: var(--text-primary);
+        }
+
+        td.value-cell {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 13px;
+            color: #334155;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover td {
+            background-color: #f8fafc;
+        }
+
+        /* Action Buttons & Select Controls */
+        .btn {
+            background-color: var(--accent-color);
+            color: #ffffff;
+            border: none;
+            padding: 7px 14px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-color 0.15s ease-in-out;
+        }
+
+        .btn:hover {
+            background-color: var(--accent-hover);
+        }
+
+        .btn.copied {
+            background-color: var(--success-color);
+        }
+
+        /* Integrated Bottom Export Bar */
+        .table-export-bar {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 12px;
+            padding: 14px 18px;
+            background-color: var(--bg-subtle);
+            border-top: 1px solid var(--border-color);
+        }
+
+        .table-export-bar label {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        .format-select {
+            padding: 7px 12px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            background-color: var(--bg-card);
+            color: var(--text-primary);
+            font-size: 13px;
+            outline: none;
+            cursor: pointer;
+            transition: border-color 0.15s ease;
+        }
+
+        .format-select:focus {
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+        }
+
+        /* Status feedback styles */
+        .error {
+            color: #dc2626;
+            background-color: #fef2f2;
+            border: 1px solid #fecaca;
+            padding: 16px;
+            border-radius: var(--radius-md);
+        }
+
+        .empty {
+            color: var(--text-secondary);
+            font-style: italic;
+            padding: 20px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>Data Table Viewer</h2>
+    <div id="content">Loading table data...</div>
+
+    <script>
+        // Function to decode Base64URL to standard UTF-8 string
+        function base64UrlDecode(str) {
+            let base64 = str.replace(/-/g, '+').replace(/_/g, '/');
+            const padLength = (4 - (base64.length % 4)) % 4;
+            base64 += '='.repeat(padLength);
+
+            const binaryString = atob(base64);
+            const bytes = Uint8Array.from(binaryString, char => char.charCodeAt(0));
+            return new TextDecoder().decode(bytes);
+        }
+
+        // Helper function for clipboard visual feedback
+        async function copyToClipboard(button, textToCopy) {
+            try {
+                await navigator.clipboard.writeText(textToCopy);
+                
+                const originalText = button.textContent;
+                button.textContent = 'Copied!';
+                button.classList.add('copied');
+                
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.classList.remove('copied');
+                }, 1500);
+            } catch (err) {
+                alert('Failed to copy: ' + err);
+            }
+        }
+
+        // Format generators for entire table copy
+        function formatTableData(dataArray, format) {
+            switch (format) {
+                case 'tsv':
+                    let tsv = "Name\tValue\n";
+                    dataArray.forEach(row => {
+                        const name = String(row.name ?? '').replace(/\t|\n/g, ' ');
+                        const val = String(row.value ?? '').replace(/\t|\n/g, ' ');
+                        tsv += `${name}\t${val}\n`;
+                    });
+                    return tsv;
+
+                case 'json':
+                    return JSON.stringify(dataArray, null, 2);
+
+                case 'markdown':
+                    let md = "| Name | Value |\n| --- | --- |\n";
+                    dataArray.forEach(row => {
+                        const name = String(row.name ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
+                        const val = String(row.value ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
+                        md += `| ${name} | ${val} |\n`;
+                    });
+                    return md;
+
+                case 'csv':
+                    let csv = '"Name","Value"\n';
+                    dataArray.forEach(row => {
+                        const name = String(row.name ?? '').replace(/"/g, '""');
+                        const val = String(row.value ?? '').replace(/"/g, '""');
+                        csv += `"${name}","${val}"\n`;
+                    });
+                    return csv;
+
+                default:
+                    return '';
+            }
+        }
+
+        function renderTable() {
+            const container = document.getElementById('content');
+            
+            const urlParams = new URLSearchParams(window.location.search);
+            const encodedData = urlParams.get('data');
+
+            if (!encodedData) {
+                container.innerHTML = `<div class="empty">No 'data' query parameter found in URL. Please provide a Base64URL string.</div>`;
+                return;
+            }
+
+            try {
+                const jsonString = base64UrlDecode(encodedData);
+                const dataArray = JSON.parse(jsonString);
+
+                if (!Array.isArray(dataArray) || dataArray.length === 0) {
+                    container.innerHTML = `<div class="empty">The provided data is empty or invalid.</div>`;
+                    return;
+                }
+
+                // Clear previous state
+                container.innerHTML = '';
+
+                // Create Card Container
+                const card = document.createElement('div');
+                card.className = 'card';
+
+                // Create Table
+                const table = document.createElement('table');
+                table.innerHTML = `
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Value</th>
+                            <th style="width: 80px; text-align: right;">Action</th>
+                        </tr>
+                    </thead>
+                `;
+
+                const tbody = document.createElement('tbody');
+
+                // Build Rows Safely (XSS Safe via textContent)
+                dataArray.forEach((row) => {
+                    const tr = document.createElement('tr');
+
+                    const tdName = document.createElement('td');
+                    tdName.textContent = String(row.name ?? '');
+
+                    const tdValue = document.createElement('td');
+                    tdValue.className = 'value-cell';
+                    const rawVal = String(row.value ?? '');
+                    tdValue.textContent = rawVal;
+
+                    const tdAction = document.createElement('td');
+                    tdAction.style.textAlign = 'right';
+
+                    const copyBtn = document.createElement('button');
+                    copyBtn.className = 'btn';
+                    copyBtn.textContent = 'Copy';
+                    copyBtn.addEventListener('click', () => copyToClipboard(copyBtn, rawVal));
+
+                    tdAction.appendChild(copyBtn);
+                    tr.appendChild(tdName);
+                    tr.appendChild(tdValue);
+                    tr.appendChild(tdAction);
+                    tbody.appendChild(tr);
+                });
+
+                table.appendChild(tbody);
+                card.appendChild(table);
+
+                // Build Bottom Multi-Format Export Bar
+                const exportBar = document.createElement('div');
+                exportBar.className = 'table-export-bar';
+                exportBar.innerHTML = `
+                    <label for="formatSelect">Copy Entire Table As:</label>
+                    <select id="formatSelect" class="format-select">
+                        <option value="tsv">TSV (Excel / Google Sheets)</option>
+                        <option value="json">JSON</option>
+                        <option value="markdown">Markdown</option>
+                        <option value="csv">CSV</option>
+                    </select>
+                    <button id="copyTableBtn" class="btn">Copy Table</button>
+                `;
+
+                card.appendChild(exportBar);
+                container.appendChild(card);
+
+                // Attach Full Table Copy Listener
+                const copyTableBtn = exportBar.querySelector('#copyTableBtn');
+                const formatSelect = exportBar.querySelector('#formatSelect');
+
+                copyTableBtn.addEventListener('click', () => {
+                    const selectedFormat = formatSelect.value;
+                    const formattedData = formatTableData(dataArray, selectedFormat);
+                    copyToClipboard(copyTableBtn, formattedData);
+                });
+
+            } catch (err) {
+                container.innerHTML = `<div class="error">Failed to decode or parse data: ${err.message}</div>`;
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', renderTable);
+    </script>
+</body>
+</html>
